@@ -1,0 +1,47 @@
+---
+description: 领域层缓存、Registry 设计及编码注意事项，防止 AI/开发幻觉
+globs: ["srv/game/domain/**/*.go", "srv/game/infrastructure/**/*.go", "srv/game/application/**/*.go"]
+alwaysApply: false
+---
+
+# 领域缓存、Registry 与编码注意事项（防幻觉）
+
+本文档集中约定：**Registry 设计**、**缓存系统设计**、**领域编码注意点**。
+
+**详细实现说明**：`srv/game/infrastructure/README.md` 的「Registry 与内存缓存约定」。
+
+## Registry 设计
+
+### 存什么
+- **只存 `*XxxService`（XxxServiceHolder）**，例如：`*BackpackService`、`*RoleEntityService`、`*SkillCollectionService`
+- **不存 Entity**：Registry 的 value 是 Holder/Service，需要 Entity 时通过 `holder.GetXxx()` 取得
+
+### 一个领域一个 Registry
+- 每个**聚合根领域**一个 Registry，由 `DomainManagerRegistry` 统一暴露
+- **不为以下子聚合单独建 Registry**：Currency、EquipScheme、ArenaSeason、ArenaMirror、ArenaMatch
+- 上述作为**聚合根成员变量**，随根加载与缓存
+
+### 进入与清理
+- **进入必入 Registry**：凡通过仓储加载或新建、且会被后续查找使用的，**必须** `GetXxxRegistry().SetInstance(id, holder)`
+- **清理只做 `Registry.RemoveInstance`**：登出、清缓存等，**只做** `GetXxxRegistry().RemoveInstance(id)`
+
+### 禁止
+- ❌ **禁止 `CacheEntity`**：仓储接口不包含、不实现 `CacheEntity`
+- ❌ **禁止为 Currency、EquipScheme、ArenaSeason、ArenaMirror、ArenaMatch 单独建 Registry**
+- ❌ **禁止 Registry 存 Entity**：只存 `*XxxService`/Holder
+
+## 缓存系统设计
+
+### 内存缓存只通过 Registry
+- 对外的**内存缓存入口**只有 **Registry**（GetInstance / SetInstance / RemoveInstance）
+- 仓储实现使用 `RegistryXxxRepository`，包装 `RedisXxxRepository`
+
+### Redis Key 使用规范
+- ✅ **各子域内实现**：Redis Key 格式与生成在各自子域 `domain/{subdomain}/entity/storage/` 中定义（key_constants + Storage 的 GetRedisKey()），基础设施通过 `PersistableEntity.GetRedisKey()` 或子域提供的 Key 方式获取
+- ❌ **禁止硬编码**：不要在代码中直接使用字符串作为 Redis Key
+
+## 领域编码注意点
+
+- 领域层代码应该保持无状态
+- 禁止在领域层使用锁（`sync.Mutex`、`sync.RWMutex`）
+- 必须使用 `safemap` 包替代标准库 `map` 类型

@@ -1,0 +1,13 @@
+---
+description: 部署、配置中心、测试目录约定；详述见 deploy-tool / testing Skill
+globs: ["deploy/**/*.sh", "qa/**/*.go", "**/*_test.go"]
+alwaysApply: false
+---
+
+# 部署与测试（摘要）
+
+- **重启测试**：必须用 `deploy/` 脚本（如 `./start_xuhai.sh game`），勿手启。**详述**：`.cursor/skills/deploy-tool/SKILL.md`。
+- **改配置**：直接维护 **`srv/<服务>/bin`**，打包随 **`deploy/build.sh`** 进 `dist`。**不再**默认走 config-sync 上传；工具代码仍保留可手动。详 **deploy-tool Skill**、`tools/config-sync/DEPRECATED.md`。
+- **ServerID**：与 `login.toml` 的 `GameServers[].ServerID` 及对应 `game_id` 一致。
+- **单测**：`_test.go`；集成：子域 `*_integration_test.go`；**接口/BDD**：`qa/integration/`，规范 **`.cursor/rules/testing.mdc`**。
+- **GM**：`.cursor/rules/gm.mdc` + **gm-command Skill**。

@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "redis": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@gongrzhe/server-redis-mcp@1.0.0",
+        "redis://:Ee12ws4@172.16.3.55:6379/1"
+      ]
+    },
+    "API": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "apifox-mcp-server@latest",
+        "--project-id=7556167"
+      ],
+      "env": {
+        "APIFOX_ACCESS_TOKEN": "APS-6BaZuvLZMVeA0jlxpl6hRjd35zyfHioT"
+      }
+    },
+    "mcphttp": {
+      "command": "tools/mcp/mcphttp.exe",
+      "args": []
+    }
+  }
+}

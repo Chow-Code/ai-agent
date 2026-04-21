@@ -1,0 +1,36 @@
+---
+description: 开发 Harness 底线（PB 优先、API 来源、验证证据）— 每轮对话自动提醒
+alwaysApply: true
+---
+
+# Harness 底线（自动）
+
+**与 QA 对齐（同一套事实与验收）**：接口与消息名以 **`qa/api/{domain}.yaml`** 为唯一来源；可执行验证为 **`qa/integration/{领域}/`** 下 BDD（Ginkgo + Gomega，见 **`qa/README.md`**）；宣称完成前须有 **`go test ./qa/integration/...`**（或约定子路径）等可引用输出。**Cursor Hook**（`hooks.json`、`workflow-gate`、状态文件）只负责阶段门禁与落盘，**不替代**上述 API/BDD 验收。
+
+本规则与 `bdd.mdc`、`api-testing.mdc` 一致；涉及协议/新接口时**额外**遵守下列不变量。
+
+## 必须遵守
+
+1. **PB 与客户端对齐后再大改**  
+   动 `srv/` 大块业务或大规模 Handler 前，先明确协议结论（消息全名、字段、错误语义、兼容）。信息不足时先问清，不猜字段。
+
+2. **接口与测试只认 `qa/api/{domain}.yaml`**  
+   消息名用完整名称（如 `MsgCtrReqXxx`），禁止编造路径、字段或简化名。
+
+3. **验证证据先于「完成」**  
+   未在本轮对话中运行相关命令并基于输出下结论前，不得宣称「已完成」「已通过」「没问题」。说明跑了什么命令、结果要点。
+
+4. **生成链**  
+   改 `proto`/`.lp` 后按项目 Skill 走 proto / handler 生成，禁止手写绕过约定生成步骤。
+
+## 端到端与 @ 命令
+
+- 需求驱动、按步做完：`.cursor/commands/harness.md`（**@harness**）；须同时遵守 **`bdd.mdc`**、**`api-testing.mdc`** 与上文底线。
+
+## 门禁与 Hook（不靠长流程规则）
+
+- **需求与计划**：改仓库前须**确认需求**；**若无对应计划则先建/更新 `docs/plans/` 再动手** — 见 **`requirement-plan-before-code.mdc`**。Hook **不会**替你完成「有没有计划」的判断与写计划。
+- **本条输入进模型前**：**`beforeSubmitPrompt`** → **`run_hook.py beforeSubmitPrompt`**（实现为 **`.cursor/hooks/events/before_submit_prompt.py`**，见 **`.cursor/hooks.json`**）。可选 **`workflow-state.json`** 的 **`block_submit`** 等（契约 **§6**）。**不是** `sessionStart`（新开会话是另一事件）。
+- **子代理结束落盘**：**`subagentStop`** → **`run_hook.py subagentStop`**（实现为 **`.cursor/hooks/events/subagent_stop.py`**），解析回复里的 **`workflow-gate`** 写入状态（**不是** Hook 拉起对话或 Task）。主 Agent 回复若需落盘可**手动**跑 **`run_hook.py subagentStop` + Markdown**（见 **`.cursor/hooks/README.md`**）。
+- **模型侧**：Subagent 须在回复末尾输出带围栏名 **`workflow-gate`** 的 JSON 代码块；**不以**口头「过了」为准。细则见 **`.cursor/docs/workflow-gate-contract.md`**。
+- **Hook 与聊天展示**：**`stop`** 的合法返回字段是 **`followup_message`**（自动跟进的提示），**不是** `user_message`；**`sessionEnd`** 才用 `user_message` 等。IDE **不保证**把 hook stdout 显示在对话里；完整轨迹以 **`.cursor/hook-logs/LAST_EXIT_NOTICE.txt`**、**`sessions/<id>/lifecycle.log`**、**输出 → Hooks** 为准。

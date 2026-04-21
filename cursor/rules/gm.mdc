@@ -1,0 +1,16 @@
+---
+description: GM 开发与测试时调用约定；详细指令列表见 gm-command Skill
+alwaysApply: false
+---
+
+# GM 指令（摘要）
+
+- **调用**：`POST {{gameServerConsoleAddr}}/api/command`，Header `Session-Token`，Body `{"Command": ",,命令名,参数..."}`。
+- **实现位置**：`srv/game/handler/gm_command/`。
+- **指令列表、参数、造数流程**：`.cursor/skills/gm-command/SKILL.md`。
+
+## 常用造数组合
+
+- **获取角色 ID**：`,,getplayerroles` 返回所有角色的 roleId、level 等（JsonData 含 roles 数组）。
+- **设置等级**：`,,setrolelevel,roleId,level` 需指定 roleId；roleId=0 表示批量设置所有角色。
+- **获取进图列表**：`,,getplayermapentries` 返回当前进图及 mapKeyInBattle（供 mockmapfinish、BDD 等使用，无参数）。

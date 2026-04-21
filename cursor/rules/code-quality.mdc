@@ -1,0 +1,157 @@
+---
+description: 代码质量规范
+globs: ["**/*.go"]
+alwaysApply: false
+---
+
+# 代码质量规范
+
+## 可读性
+- 使用有意义的变量名和函数名
+- 避免魔法数字,使用常量或配置
+- 保持函数简短,一个函数只做一件事
+- 使用注释解释"为什么",而不是"做什么"
+
+## 可维护性
+- 遵循 DRY 原则(Don't Repeat Yourself)
+- 保持代码模块化,高内聚低耦合
+- 及时重构,消除代码异味
+- **代码规模控制**:
+  - 函数行数不超过 500 行
+  - 参数数量不超过 10 个
+  - 文件行数不超过 5000 行
+- **文档同步**:修改子域代码时,必须同步更新对应子域的`README.md`文档
+
+## 日志使用规范
+
+### 统一日志库
+项目使用统一的日志库 `tlog`，位于 `server/common/tlog`。**所有业务代码必须使用统一的日志接口**,禁止直接使用 `fmt.Println`、`fmt.Printf` 或标准库 `log` 包输出日志。
+
+### 日志接口
+必须使用 `tlog.LogCommonLogWithContext(ctx, gameID, logLevel, serviceName, message)`。推荐使用包级别便捷函数。
+
+### 日志级别
+- **LogLevelDebug**:调试信息
+- **LogLevelInfo**:一般信息
+- **LogLevelWarn**:警告信息
+- **LogLevelError**:错误信息
+- **LogLevelFatal**:致命错误
+
+### 日志精简原则
+- **每个函数只保留一行成功日志**:函数结束时记录一行成功日志,包含关键结果信息
+- **保留所有错误日志**:所有 `LogLevelError` 和 `LogLevelWarn` 级别的日志都必须保留
+- **删除冗余日志**:删除函数开始、中间步骤、循环迭代等冗余的Info级别日志
+- **避免日志爆炸**:不要在循环中记录日志
+
+### 禁止事项
+- ❌ 禁止使用 `fmt.Println/Printf` 直接输出日志
+- ❌ 禁止使用标准库 `log` 包
+- ❌ 禁止冗余日志:禁止在函数开始、中间步骤、循环迭代时记录Info级别日志
+- ✅ 必须保留错误日志:所有 `LogLevelError` 和 `LogLevelWarn` 级别的日志都必须保留
+
+## 异步任务和消息发送规范
+
+### WorkPool 统一管理异步任务（强制要求）
+
+⚠️ **核心原则**: **所有延迟任务、异步消息发送必须使用 WorkPool，禁止使用 `go func()` 创建 goroutine**
+
+### 使用场景
+
+**必须使用 WorkPool 的场景**:
+- ✅ 延迟发送消息（如登录后延迟推送）
+- ✅ 后台任务处理（如数据初始化、战斗结算）
+- ✅ 需要保证顺序执行的异步任务（同一玩家的操作）
+- ✅ 任何"延迟 + 处理"的模式
+
+**禁止使用 `go func()` 的场景**:
+- ❌ 延迟发送消息（必须用 WorkPool）
+- ❌ 后台数据处理（必须用 WorkPool）
+- ❌ 任何业务逻辑的异步执行（必须用 WorkPool）
+
+### 正确示例
+
+**推荐方式 1**: 使用 `shared.SendToClientAsync`（已封装 WorkPool）
+```go
+// 异步发送消息（自动使用 WorkPool）
+shared.SendToClientAsync(ctx, accountID, gameID, msg, workPool)
+```
+
+**推荐方式 2**: 直接使用 WorkPool 提交任务
+```go
+// 提交后台任务到 workPool
+workPool.SubmitWithKey(accountID, func() {
+    asyncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    asyncCtx, _, _, _ = trace.GetOrCreateTraceContext(asyncCtx)
+    
+    // 延迟 N 秒
+    time.Sleep(3 * time.Second)
+    
+    // 执行业务逻辑
+    doSomething(asyncCtx)
+})
+```
+
+### 错误示例
+
+**❌ 禁止**: 使用 `go func()` 发送消息或处理后台任务
+```go
+// ❌ 错误：不要这样做
+go func() {
+    time.Sleep(3 * time.Second)
+    sendMessage(ctx, msg)
+}()
+
+// ❌ 错误：不要这样做
+go doSomethingInBackground(ctx)
+```
+
+### WorkPool 的优势
+
+1. **统一管理**: 所有异步任务集中管理，便于监控和调试
+2. **顺序保证**: 使用 `SubmitWithKey` 可以保证同一 key 的任务顺序执行
+3. **资源控制**: 避免无限制创建 goroutine 导致资源耗尽
+4. **代码一致性**: 统一的异步任务模式，提升代码可读性
+
+### 获取 WorkPool 实例
+
+```go
+// 获取玩家相关的 WorkPool（推荐用于玩家相关操作）
+workPool := workpool.GetPlayerWorkPool()
+
+// 或从容器获取（登录流程等场景）
+workPool := container.InfrastructureServices().LoginWorkPool
+```
+
+### 禁止事项
+
+- ❌ **禁止使用 `go func()` 进行延迟消息发送**
+- ❌ **禁止使用 `go func()` 处理后台业务逻辑**
+- ❌ **禁止在循环中创建大量 goroutine**
+- ✅ **必须使用 WorkPool.SubmitWithKey** 保证同一玩家的任务顺序执行
+- ✅ **必须使用 `shared.SendToClientAsync`** 进行异步消息发送
+
+### 例外情况
+
+**仅在以下场景可以使用 `go func()`**:
+- 长期运行的定时任务（如每日定时清理，使用 `time.Ticker`）
+- 基础设施层的守护线程（如 ChangeTracker 的定期提交）
+- 临时的一次性非关键任务（需要代码审查确认）
+
+## 性能
+- 避免过早优化,先保证代码正确性
+- 使用 `go test -bench` 进行性能测试
+- 注意内存分配,避免不必要的内存分配
+- 合理使用缓存和池化
+
+## 子域代码修改流程
+1. 修改代码
+2. 同步更新文档（对应子域的`README.md`）
+3. 提交代码（代码和文档在同一个提交中）
+
+### 需要更新文档的情况
+- ✅ 新增/修改实体、服务、仓储
+- ✅ 修改依赖关系
+- ✅ 重构代码结构
+- ✅ 新增或删除功能
+- ✅ 修改业务规则

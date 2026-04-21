@@ -1,0 +1,32 @@
+# TL3Server Development Guidelines
+
+Auto-generated from all feature plans. Last updated: 2026-02-06
+
+## Active Technologies
+- Go 1.21+ + Protobuf（消息序列化）、Redis（数据存储）、handlergen（Handler 代码生成）、persist（PersistableEntity 持久化框架）、tlog（统一日志）、excel（配置表加载） (001-mining-system)
+- Redis（玩家个人数据 String/JSON + 公有数据 String/JSON + Sorted Set 索引） (001-mining-system)
+
+- Go（与项目一致） + 项目现有栈（handlergen、protobuf、tlog、clock、safemap、eventbus、WorkPool） (003-role-levelup)
+
+## Project Structure
+
+```text
+src/
+tests/
+```
+
+## Commands
+
+# Add commands for Go（与项目一致）
+
+## Code Style
+
+Go（与项目一致）: Follow standard conventions
+
+## Recent Changes
+- 001-mining-system: Added Go 1.21+ + Protobuf（消息序列化）、Redis（数据存储）、handlergen（Handler 代码生成）、persist（PersistableEntity 持久化框架）、tlog（统一日志）、excel（配置表加载）
+
+- 003-role-levelup: Added Go（与项目一致） + 项目现有栈（handlergen、protobuf、tlog、clock、safemap、eventbus、WorkPool）
+
+<!-- MANUAL ADDITIONS START -->
+<!-- MANUAL ADDITIONS END -->

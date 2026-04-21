@@ -1,0 +1,74 @@
+---
+description: Redis 存储规范和 Key 命名规范
+globs: ["**/*.go"]
+alwaysApply: false
+---
+
+# Redis 存储规范
+
+## Redis Key 命名规范
+
+### 基本原则
+
+- **各子域自管**：Redis Key 格式与生成在**各自子域**内实现，禁止硬编码
+- **定义位置**：`domain/{subdomain}/entity/storage/`（如 `key_constants.go` + 各 Storage 的 `GetRedisKey()`）
+- **符合 DDD**：领域层持有本子域实体的 Key 格式知识，基础设施层通过 `PersistableEntity.GetRedisKey()` 或子域提供的 Key 生成方式获取，不在仓储实现中硬编码 Key 字符串
+
+### Key 命名格式
+
+**格式规则**: `{前缀}:{主体ID}:{功能}:{功能ID} = value`
+
+**前缀规范**:
+- `playerrole:` - 角色相关数据（如 `playerrole:{角色ID}:skills:{技能ID}`）
+- `player:` - 玩家相关数据（如 `player:{玩家ID}:{角色ID}`）
+
+### 各子域内实现规范
+
+**Key 格式常量**：在 `domain/{subdomain}/entity/storage/key_constants.go` 中定义，例如：
+```go
+// domain/arena/entity/storage/key_constants.go
+const (
+	RedisKeyFormatArenaPlayer = "arena:player:%d"
+	RedisKeyFormatArenaSeason = "arena:season:%d"
+)
+```
+
+**Key 生成**：各 Storage 实现 `PersistableEntity` 的 `GetRedisKey()`，在**本子域** entity/storage 内使用上述常量生成 Key，例如：
+```go
+// domain/arena/entity/storage/arena_player_storage.go
+func (s *ArenaPlayerStorage) GetRedisKey() string {
+	return fmt.Sprintf(RedisKeyFormatArenaPlayer, s.PlayerId)
+}
+```
+
+**基础设施层**：GenericRepository、ChangeTracker、仓储实现通过 `data.GetRedisKey()` 获取 Key，或调用本子域 domain 内提供的 Key 生成函数/常量（仓储可 import 本子域 domain），**禁止在基础设施层硬编码 Key 字符串**。
+
+### 禁止事项
+
+- ❌ **禁止硬编码**：不要在代码中直接使用未通过常量或 GetRedisKey() 的字符串作为 Redis Key 或字段名
+- ❌ **禁止在仓储实现中硬编码 Key**：Key 格式与生成应在各自领域 `domain/{subdomain}/entity/storage/` 中定义，仓储通过实体或子域提供的 Key 方式获取
+- ✅ **必须在各自领域内集中定义**：每个子域的 Redis Key 格式与生成逻辑放在该子域的 `entity/storage/` 下，保持单一来源
+
+## ChangeTracker 与“标记保存/删除”规范
+
+持久化走 **ChangeTracker 定时提交**：业务只做“标记”，不直接调用 `store.SaveData` / `store.DeleteData`（由 ChangeTracker 在提交周期内统一落库/删 key）。
+
+### MarkModified（标记需要保存）
+
+- **用途**：标记实体/Storage 已修改，需要写入 Redis。内部会 `tracker.Register(entity)`，由 ChangeTracker 定时提交时调用 `store.SaveData`。
+- **使用场景**：
+  - **领域实体**：实体的 setter 或修改方法内调用 `markModified()`，`markModified()` 内部调用 `persist.MarkModified(entity.ToData())`。
+  - **基础设施层**：在修改或构造好 `PersistableEntity`（如 Storage）后，直接调用 `persist.MarkModified(data)`，不再调用 `store.SaveData`。
+- **禁止**：❌ 在业务/基础设施中直接调用 `store.SaveData` 做常规保存；✅ 统一通过 `persist.MarkModified` 标记，由 ChangeTracker 提交。
+
+### MarkDeletedByKey（标记已删除）
+
+- **用途**：已知 Redis Key 时，标记该 key 需要从 Redis 删除。内部会 `tracker.Unregister(key)`，由 ChangeTracker 定时提交时调用 `store.DeleteData`。
+- **使用场景**：命中/重置等逻辑只需“删 key”、且已有 key 字符串时（如从本子域 `entity/storage` 的 Key 常量或 `GetRedisKey()` 得到），调用 `persist.MarkDeletedByKey(key)`，不直接调用 `store.DeleteData`。
+- **Key 来源**：key 必须来自本子域 `entity/storage` 的常量或 `PersistableEntity.GetRedisKey()`，禁止在基础设施层拼字符串。
+- **可选**：若有实体引用，可用 `persist.MarkDeleted(entity)`，内部用 `entity.ToData().GetRedisKey()` 再 Unregister。
+
+### 禁止事项
+
+- ❌ **禁止直接 SaveData**：常规保存必须通过 `persist.MarkModified` 标记，不直接调用 `store.SaveData`。
+- ❌ **禁止直接 DeleteData**：删除必须通过 `persist.MarkDeletedByKey`（或 `MarkDeleted`）标记，由 ChangeTracker 提交时删除；不在业务/基础设施中直接调用 `store.DeleteData`（除非是 ChangeTracker 内部或明确要求的同步删除场景）。

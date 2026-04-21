@@ -1,0 +1,10 @@
+---
+description: 可拆分任务优先派发 Subagent；主 Agent 负责拆解与调度
+alwaysApply: true
+---
+
+# Subagent 派发（可拆分任务）
+
+- 当任务可拆成多个**相对独立**的子任务（无强顺序依赖、无共享可变状态）时，**优先使用 Subagent**（Task）并行或分阶段派发，不在主对话里一人堆完。
+- 可用 Subagent 与用途见 [.cursor/agents/README.md](.cursor/agents/README.md)（codereview、executor、qa-tester、explore、shell 等）。
+- 主 Agent：拆解目标 → Task 派发 Subagent → 汇合结果；**交付门禁**以 **Hook** + **`workflow-gate`** 为准，见 **`.cursor/docs/workflow-gate-contract.md`** 与 **`.cursor/hooks/README.md`**。

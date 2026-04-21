@@ -1,0 +1,72 @@
+---
+description: BDD 接口测试规范 - 使用 Ginkgo + Gomega 的 BDD 风格，约束数据来源与断言
+globs: ["qa/**/*_test.go", "qa/integration/**", "qa/testutil/**"]
+alwaysApply: true
+---
+
+# BDD 接口测试规范
+
+## 测试风格（强制）
+
+- ✅ **接口/集成测试采用 BDD**：使用 **Ginkgo + Gomega** 编写可执行用例
+- ✅ **代码即用例**：每条业务场景对应 `Describe`/`Context` 下的 `It`，断言使用 Gomega 的 `Expect(...).To(...)`
+- ✅ **结构约定**：`BeforeEach` 做登录/连接等前置，`AfterEach` 做清理；单个 `It` 内完成一次请求与响应断言
+
+## 框架与目录
+
+- **框架**：Ginkgo v2（Describe/Context/It/BeforeEach/AfterEach）+ Gomega（Expect 断言）
+- **入口**：每个领域一个 `TestXxx(t *testing.T)`，内部 `gomega.RegisterFailHandler(ginkgo.Fail)` 与 `ginkgo.RunSpecs(t, "Suite 名")`
+- **执行输出（强制）**：运行 `qa/integration` 下 BDD 时，`go test` **必须**附加 **`-ginkgo.v`**，否则不逐条打印 `It` 名称、`ginkgo.Skip` 原因及 `t.Logf` 步骤，无法区分通过/跳过用例。示例：`go test -v -ginkgo.v ./qa/integration/pet/`；全量：`go test -v -ginkgo.v ./qa/integration/...`
+- **目录**：`qa/integration/{领域}/` 下放该领域的 `*_test.go`，通用封装在 `qa/integration/testutil/`（env、login_http、tcp_client、gm、testing_t）
+- **传输**：业务请求以 TCP（PvpCodec）为主，需 GM 或控制台 HTTP 时用 testutil 的 GetSessionToken、GMCommand；协议与消息名以 `qa/api/{domain}.yaml` 为准
+
+## 核心约束（防幻觉）
+
+- ✅ **接口信息以 API 文档为准**：请求/响应字段、消息名称、路径均以 `qa/api/{domain}.yaml` 为准，禁止在测试中编造
+- ✅ **消息名称完整**：必须使用完整消息名（如 `MsgCtrReqLogin`、`MsgCtrReqOpenKnapsack`），禁止简化名（如 `login`、`openKnapsack`）
+- ✅ **Session 通过 Web 登录获取**：所有需登录的用例通过登录服 HTTP 拿 token，再在 TCP/HTTP 请求中使用，禁止直接操作数据库或伪造 session
+- ✅ **断言与 API 一致**：每个 `It` 的 `Expect` 应覆盖接口成功语义（如存在 `Ret` 时验证为 0、关键业务字段非空或符合 schema）
+
+## 前置与 testutil 使用
+
+- **仅 TCP 登录**：BeforeEach 中 `t := ginkgo.GinkgoT()`，`conn = testutil.Dial(t, testutil.GetGatewayTCPAddr())`，`testutil.Login(t, conn, account)`。
+- **需 GM 造数**：先 `sessionToken, err := testutil.GetSessionTokenOptional(t, account)`，再按需 `testutil.GMCommandOptional(sessionToken, ",,additem,itemId,count")`，最后 `Dial` + `Login`；GM 失败可继续，依赖道具的 It 内可 `ginkgo.Skip`（**须用 `-ginkgo.v` 才能看到 Skip 的用例名与原因**）。
+- **一发一收**：`testutil.Call(t, conn, reqMsgId, req)` 返回一条响应；若服务端先推通知再推响应，用 `testutil.CallExpect(t, conn, reqMsgId, req, expectedMsgId)` 循环收包直到目标 MsgId。
+- **TestingT**：testutil 接受 `TestingT` 接口，`*testing.T` 与 `ginkgo.GinkgoT()` 均兼容。
+
+### 重新登录（模拟掉线重连）
+
+- **规范**：模拟掉线重连时**不断开 TCP**，在同一连接上先 `MsgCtrReqLoginOut` 登出，再 `MsgCtrReqLogin` 重新登录。
+- **推荐用法**：`testutil.ReLoginOnSameConn(t, conn, account, sectType, genderType)`，返回 `*MsgCtrResLogin`。
+- **手动写法**：`testutil.CallExpect(t, conn, MsgCtrReqLoginOut, req, MsgCtrResLoginOut)` → `testutil.LoginWithRoleTypeAndGetLoginRes(t, conn, account, sectType, genderType)`。
+- **直接再次登录**：验证「同连接重登」且无需先登出时，可只再次执行 `MsgCtrReqLogin`（重新 HTTP 取 session）；`testutil.LoginAgainOnSameConn` 与 `LoginWithRoleTypeAndGetLoginRes` 等价。
+- **禁止**：❌ 使用 `conn.Close()` 断开再 `Dial` 新建连接来模拟重连（会导致 ReqPlayerOffline 等时序问题）。
+
+## BDD 写法约定
+
+- **Describe**：领域或模块（如「背包领域 TCP 接口」）
+- **Context**（可选）：场景分支（如「当背包有道具时」）
+- **It**：单条用例，描述应可读（如「打开背包应返回 Knapsack」）
+- **BeforeEach**：建立连接、登录（及可选 GM）；使用 `ginkgo.GinkgoT()` 传入 testutil
+- **断言**：使用 `gomega.Expect(x).To(gomega.Equal(y))`、`gomega.Expect(x).NotTo(gomega.BeNil())` 等，不混用其他断言库
+
+## 测试用例设计顺序与覆盖要求
+
+- ✅ **先测失败再测成功**：同一接口的用例中，先编写并执行失败/异常场景用例（如参数缺失、权限不足、业务校验失败、Ret≠0 等），再编写成功场景用例。便于快速发现错误处理是否正确，避免成功用例通过后误判接口完整。
+- ✅ **响应内容校验**：每个 `It` 内需检查响应是否符合要求：验证 `Ret`、关键业务字段是否存在、类型是否正确、值是否符合 schema 或业务预期；禁止仅断言「收到响应」而不校验具体内容。
+- ✅ **推送校验（有推送时）**：若接口处理过程中会推送通知（如 NtfXxx），需在用例中明确验证：① 推送是否成功下发（收到对应 MsgId 的消息）；② 推送数据是否符合要求（关键字段、业务语义与 API 文档一致）。可使用 `testutil.CallExpect` 循环收包直到目标 MsgId，或单独收包后断言推送结构体。
+- ✅ **Redis 持久化校验（涉及数据变更时）**：对**会改变服务端持久化状态**的操作（写入、扣除、领取、进度更新等），在断言 `Ret` 与响应体符合预期后，应**再校验 Redis 中数据已按业务生效**（例如对应 `playerrole:{id}:...` 等 Key 存在、字段值或序列化后的 Storage 与预期一致）。目的：避免仅响应「假成功」或内存态与 ChangeTracker 落库不一致。实现方式：使用 `qa/integration/testutil` 中已有的 Redis 读取封装（若有）；若无则在本领域测试中按 `test_config`/环境变量连接**与 game 一致的 Redis**，禁止硬编码生产地址；Key 格式须与 `domain/{subdomain}/entity/storage/key_constants.go` 及设计文档一致，禁止编造 Key。**例外**：纯查询类、明确无持久化副作用的接口可不做 Redis 断言。
+
+## 日志分析规则
+
+- **游戏日志目录**：`logs`（项目根下或部署目录下的 `logs`，各服务日志按服务名/实例分文件）
+- **正常玩家请求链路**：**gateway → waypoint → game →（其他 social 等取决于业务）**；排查时按该顺序确认请求是否到达各层
+- **玩家业务主日志在 game**：角色、背包、技能、升级、经验池、货币等业务逻辑日志主要在 **game** 服务；gateway 负责连接与转发，waypoint 负责路由，业务处理与错误码多在 game 日志中体现
+- **用例失败时**：先看对应请求的 **game** 日志（如 Handler、AppService、领域服务相关日志），再根据需要查看 gateway/waypoint 的连接与转发日志
+- **请求无响应/超时**：若用例在发送请求后未收到响应而超时（如 BeforeEach 中 `Login` 或 `Call` 在 tcp_client 处超时），**必须排查 game 日志**：服务端可能已处理请求并返回了错误码或记录了错误，因网络/编解码等原因客户端未收到；game 日志中的错误码和堆栈可帮助定位根因（如业务校验失败、路由未找到 game 等）
+
+## 相关文档
+
+- **QA 主文档**：`qa/README.md`
+- **API 文档**：`qa/api/README.md`、`qa/api/{domain}.yaml`
+- **接口测试数据来源与执行**：`api-testing.mdc`

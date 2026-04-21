@@ -1,0 +1,50 @@
+---
+description: 接口/BDD 测试规范（Ginkgo、qa/api、防幻觉、Given-When-Then）
+globs:
+  - "qa/**/*.go"
+  - "qa/**/*.yaml"
+  - "qa/integration/**"
+  - "qa/testutil/**"
+alwaysApply: false
+---
+
+# 接口与 BDD 测试规范
+
+整合原 bdd.mdc + api-testing.mdc。编写或运行 `qa/integration/`、阅读 `qa/api/` 时加载本规则。
+
+**完整步骤、用例数量、JSON 报告、启动服**：见技能 **`.cursor/skills/bdd-qa/SKILL.md`**（勿与本文重复维护长文）。
+
+## 核心要求（强制）
+
+- 接口信息必须从 `qa/api/{domain}.yaml` 读取，禁止编造。
+- 消息名完整：`MsgCtrReqLogin` 等，禁止简化名。
+- Session 通过 Web 登录获取，禁止直连数据库伪造。
+- BDD：**Ginkgo + Gomega**；目录 `qa/integration/{领域}/`；通用封装 `qa/integration/testutil/`。
+
+## BDD 结构
+
+- `BeforeEach`：Dial、Login、可选 GM；`AfterEach` 清理。
+- 一发一收：`testutil.Call`；先通知后响应用 `testutil.CallExpect`。
+- 需 GM：先 `GetSessionTokenOptional`、`GMCommandOptional`，再 Dial + Login。
+
+## 用例描述
+
+- `It` 标题可客观断言（如「返回 MsgXxxRes 且 Ret=0」）。
+- 推荐 `It` 上方多行注释：**测试用例描述**、**Given（前置条件）**、**When-Then**（完整消息名与可断言字段）；简化场景可用单行 Given/When/Then 压缩写法。示例见 **`qa/integration/chat/chat_test.go`**。
+- 开发文档中 BDD 条目须与 `It` **一一对应**（含用例总数与逐条流程），规范见 **`.cursor/commands/development.md`** → DD-2「**BDD 接口测试条目规范**」；推荐注释首行 **`// BDD-ID: BDD-Px-yy`** 与文档编号一致，便于对账。
+
+## 路径与验证
+
+- HTTP 控制台：`POST {{gameServerConsoleAddr}}/api/{MessageName}`（完整消息名）。
+- 先验 `Ret==0`（或期望错误码场景），再验**关键业务字段**（细则见 **bdd-qa**）。
+- **每业务协议 2～5 条 `It`**、**双 JSON 汇报**：见 **bdd-qa** / `qa/test_reports/README.md`。测试用例 **Markdown** 见命令 **test-case**（非技能）。
+- 环境：`SERVER_ID` 与 login.toml、game 配置一致；详见 `qa/integration/testutil/README.md`。
+
+## 日志排查
+
+- 链路：**gateway → waypoint → game**；业务日志以 **game** 为主。
+- 超时无响应：查 game 日志（错误码、路由、业务校验）。
+
+## 文档
+
+- `qa/README.md`、`qa/api/README.md`、`.cursor/skills/bdd-qa/SKILL.md`（BDD 主技能）、`.cursor/skills/gm-command/SKILL.md`（GM 造数）。

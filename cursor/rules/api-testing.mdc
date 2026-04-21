@@ -1,0 +1,121 @@
+---
+description: 接口测试规范 - 数据来源与执行约束（可执行用例在 qa/integration；可执行测试见 bdd.mdc）
+globs: ["qa/**/*.go", "qa/**/*.yaml"]
+alwaysApply: true
+---
+
+# 接口测试规范（数据来源与执行）
+
+**可执行接口测试**：项目使用 **BDD** 编写接口/集成测试，采用 **Ginkgo + Gomega** 风格，规范见 [bdd.mdc](bdd.mdc)。本规则约束 **API 数据来源** 与 **可执行用例的执行方式**，与 bdd.mdc 共同遵守「接口信息从 API 文档读取、完整消息名、Web 登录取 session」等约定。
+
+## 核心要求（强制）
+
+- ✅ 所有接口信息必须从 `qa/api/{domain}.yaml` 读取，禁止编造（BDD 用例均适用）
+- ✅ 必须使用完整的消息名称（如 `MsgCtrReqLogin`），禁止使用简化名称
+- ✅ 所有接口测试必须通过 Web 登录获取 session，禁止直接操作数据库
+- ✅ 可执行用例位于 `qa/integration/{领域}/`，运行须带 **`-ginkgo.v`**：`go test -v -ginkgo.v ./qa/integration/...` 或单领域 `go test -v -ginkgo.v ./qa/integration/{domain}/`
+
+## 用例描述规范（可客观判断）
+
+- ✅ **描述应可客观判断**：用例标题（`It("...")`）应描述可观测的、可断言的结果，避免主观或形容词。
+- ✅ **推荐写法**：写出期望的响应类型或关键字段，例如：
+  - 「返回 MsgXxxRes 且 Ret=0」
+  - 「返回 MsgXxxRes 且 TotalCount>=0」
+  - 「A 发消息后 B 收到 NtfXxx 推送」
+- ❌ **避免**：使用「合法」「正确」「错误」「成功」等形容词作为主要描述；若用则需配合具体类型或字段（如「返回 MsgXxxRes」）。
+
+## Given-When-Then（When-Do-Then）规范（推荐）
+
+接口测试用例的**场景描述与步骤**应遵循 **Given-When-Then** 结构（等价于 When-Do-Then：在某种状态下执行某操作得到某结果），与项目设计文档和验收场景保持一致（参见 `.cursor/commands/development.md`、各 `docs/design/server` 开发文档）。
+
+- **Given（给定/前置）**：初始状态或前置条件（系统状态、已登录、已有数据等）。
+- **When（当/操作）**：被测操作（发送某请求、执行某动作）。
+- **Then（则/预期）**：可断言的结果（返回某消息且某字段=某值、收到某通知、列表包含某元素等）。
+
+**要求**：Then 必须用**可客观判断**的表述（具体错误码、字段值、消息类型），禁止仅用「成功」「正确」「失败」等主观词。
+
+## 详细用例描述结构（推荐）
+
+每个用例除简洁的 `It("...")` 标题外，**推荐**在 `It` 块上方用多行注释按 **Given-When-Then** 补充详细描述，便于评审与回归时理解。
+
+**推荐结构（与 Given-When-Then 对应）**：
+
+1. **测试用例描述**：一句话说明本用例验证的目的（可观测结果，避免主观词）。
+2. **Given（前置条件）**：执行前需满足的状态，编号列出。例如：
+   - 系统/服务正常运行，网络正常
+   - 账号/网关/目标服务可用
+   - 玩家已完成登录（及角色创建，如业务依赖）
+   - 如需造数：已通过 GM 或前置接口准备数据
+3. **When-Then（步骤及预期结果）**：按执行顺序列出，每行格式为「**When** 操作 -> **Then** 预期结果」。预期结果须用可断言的具体值（返回某某错误码、某字段非空、某列表包含某元素），避免「成功」「正确」「合法」等主观词。例如：
+   - When 发送 MsgCtrReqXxx -> Then 收到 MsgCtrResXxx，Ret=0
+   - When 创建角色 -> Then 收到 MsgCtrResCreateRole，Ret=0 且 RoleUID 非空
+   - When A 执行某操作 -> Then B 收到 NtfXxx 推送，且推送中某字段=期望值
+   - When 再次请求某接口 -> Then 返回列表中包含某 PlayerGuid
+
+**在 Go/Ginkgo 中的放置方式**：将上述三部分作为**多行注释**写在对应 `ginkgo.It("...")` 的**正上方**，保持 `It` 标题简短（与「用例描述规范」一致），详细内容放在注释中。
+
+**注释格式示例（Given-When-Then）**：
+```go
+// 测试用例描述：验证心跳接口返回服务器时间戳。
+// Given（前置条件）：
+//   1. 网关与游戏服可用，网络正常。
+//   2. 玩家已通过 TCP 登录。
+// When-Then：
+//   1. When 发送 MsgCtrReqHeartbeat -> Then 收到 MsgCtrResHeartbeat，且 ServerTimeTick 非 0。
+ginkgo.It("心跳返回 MsgCtrResHeartbeat 且 ServerTimeTick 非 0", func() {
+```
+
+## 数据来源规范（核心防幻觉措施）
+
+⚠️ **所有接口信息必须从API文档读取，禁止编造！**
+
+**执行步骤**：
+1. 确定要测试的领域（如 `account`、`skill`、`backpack`、`role`）
+2. 读取对应的API文档：`qa/api/{domain}.yaml`
+3. 从API文档中查找接口定义（`paths` 和 `components/schemas` 部分）
+4. **禁止**：不要编造接口路径、参数或返回值
+
+**禁止事项**：
+- ❌ 禁止编造接口路径、请求参数、返回值字段
+- ❌ 禁止使用简化名称（必须使用完整的消息名称）
+- ❌ 禁止使用"参考API文档"而不列出具体表格
+
+## 接口路径规范
+
+**格式**：`POST {{gameServerConsoleAddr}}/api/{MessageName}`
+
+- ✅ 使用完整的消息名称（如 `MsgCtrReqLogin`）
+- ❌ 禁止使用简化名称（如 `login`）
+
+## 测试执行规范
+
+**标准顺序**：
+1. 确定要测试的领域，读取 API 文档：`qa/api/{domain}.yaml` 获取接口定义
+2. 可执行用例在 `qa/integration/{domain}/`，运行：`go test -v -ginkgo.v ./qa/integration/{domain}/` 或 `go test -v -ginkgo.v ./qa/integration/...`（**`-ginkgo.v` 强制**，便于查看每条 `It` 与 `Skip` 原因）
+3. 登录/Session：BDD 中由 testutil 完成——仅 TCP 登录用 `testutil.Login(t, conn, account)`；需 GM 造数时先 `testutil.GetSessionTokenOptional`、再按需 `testutil.GMCommandOptional`、最后 Dial + Login
+4. **验证结果**：检查 `Ret` 字段是否为 `0`，验证所有关键字段
+
+**响应验证规则**：
+- ✅ 第一个验证点必须是 `Ret` 字段验证（必须为 `0`）
+- ✅ 验证所有关键字段是否存在、类型是否正确、值是否符合预期
+
+## 防止幻觉的具体措施
+
+1. **强制引用API文档**：编写或运行测试前必须从 `qa/api/{domain}.yaml` 获取接口定义
+2. **禁止编造接口**：只能使用API文档中定义的接口
+3. **路径格式验证**：接口路径必须使用完整消息名称
+4. **用例即代码**：用例以 `qa/integration/` 下 BDD 代码为准，不依赖其他文档
+
+## testutil 与执行方式
+
+- **环境配置**：`qa/integration/testutil/` 支持配置文件（`test_config.yaml`）与环境变量，详见 `qa/integration/testutil/README.md`；`SERVER_ID` 须与 login.toml 及 game 配置匹配。
+- **TCP 一发一收**：`testutil.Call` 一发一收；若服务端先推通知再推响应，用 `testutil.CallExpect(t, conn, reqMsgId, req, expectedMsgId)`。
+- **重新登录（不断开 TCP）**：先登出再登录用 `testutil.ReLoginOnSameConn`；若仅需同连接再次 `MsgCtrReqLogin`（不先发 LoginOut），用 `testutil.LoginAgainOnSameConn`（与 `LoginWithRoleTypeAndGetLoginRes` 等价）。
+
+## 相关文档
+
+- **Given-When-Then 验收场景规范**：`.cursor/commands/development.md`（User Story 验收场景）、`docs/design/server` 下各开发文档中的场景描述
+- **BDD 可执行测试规范**：[bdd.mdc](bdd.mdc)（Ginkgo + Gomega）
+- **QA 测试工作主文档**：`qa/README.md`
+- **API 文档说明**：`qa/api/README.md`
+- **testutil 说明**：`qa/integration/testutil/README.md`

@@ -1,0 +1,30 @@
+---
+description: Git 提交信息格式；生成或润色 commit message 时遵循
+alwaysApply: true
+---
+
+# Git 提交信息（全局提醒）
+
+生成、润色或建议 **Git commit message** 时：
+
+## 格式（单行）
+
+`type(scope): 中文描述` — 描述用**中文**、简洁、句末一般不加句号。
+
+## type（按本次 diff 实际性质选一项）
+
+`feat` 新功能 | `fix` 修 Bug | `perf` 性能 | `style` 纯格式 | `refactor` 重构（非前四类）| `test` 测试 | `ci` CI/CD | `docs` 文档 | `chore` 构建/依赖/杂项
+
+分支名里的 `feature`/`fix` **不等于** 本次提交的 type。
+
+## scope（优先按当前 Git 分支名解析）
+
+1. 去掉前缀（不区分大小写）：`feature_`、`feat_`、`fix_`、`hotfix_`、`bugfix_`、`release_`、`chore_`、`refactor_`、`dev_`、`test_`
+2. 剩余部分：有 `_` 则取**最后一段**为 scope（如 `feature_zlf_pet` → `pet`）；无 `_` 则整段为 scope（如 `feature_afk` → `afk`）
+3. scope **小写**；`main`/`master`/`develop`/游离 HEAD/无意义时 用 `misc`，并在中文描述里写清模块
+
+## 示例
+
+`refactor(pet): 更新宠物上阵与下阵响应结构`
+
+更细说明见：`.cursor/skills/git-commit-message/SKILL.md`

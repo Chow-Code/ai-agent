@@ -1,0 +1,250 @@
+---
+description: DDD 架构原则和设计模式规范
+globs: ["**/*.go"]
+alwaysApply: false
+---
+
+# DDD 架构原则和设计模式规范
+
+## 设计模式（核心原则）
+
+- **依赖注入**:通过构造函数注入依赖,使用接口定义依赖
+- **接口隔离**:接口应该小而专注,避免"胖接口"
+- **单一职责**:每个函数、类型、包都应该有单一的职责
+- **开闭原则**:对扩展开放,对修改关闭
+- **依赖倒置**:高层模块依赖抽象,不依赖具体实现（**仅在跨上下文边界使用**，见下文）
+
+## DDD 架构原则
+
+### ⚠️ 值对象与跨上下文（强制：优先复制，再用共享领域对象）
+
+- **优先复制而非共享**：本子域特有值对象定义在各自子域内 `domain/{subdomain}/valueobject/`，优先复制而非共享，能获得更好的解耦。
+- **共享领域 domain/crossdomain**：允许使用共享领域 **`domain/crossdomain`**，仅放多子域共用的**对象类型**（枚举、极简 struct、契约类型）；**禁止在 crossdomain 中定义或共享接口**；crossdomain **禁止** import 其他 domain 子域。
+- **子域之间禁止互相引用**：子域之间仍**禁止**互相 import 对方的 valueobject、entity 等包；不得在 domain 根下再设其它共享 valueobject 包（**仅 crossdomain 为唯一共享领域**）。
+- **迁移要求**：若项目中仍存在 `domain/valueobject/` 目录，应将其内容迁移至各子域 valueobject 或 crossdomain（仅对象类型）后**删除**该目录，不得保留领域层其它共享值对象包。
+- **依赖倒置仅在上下文边界**：**只在跨子域（跨上下文）协作时**使用依赖倒置与网关接口；子域**内部**可直接依赖本子域的实现（entity、port 实现、valueobject），无需为内部依赖再抽象接口。
+- **子域内部无多种实现时依赖实现**：子域内部若**没有多种实现**（仅有一种具体实现），**直接依赖该实现类型**即可，**不必**在 port/service 为该能力再定义接口；当后续出现多种实现或需要可替换性时，再抽取接口不迟。
+
+### ⚠️ 核心原则：Application层只做用例编排，禁止领域逻辑代码（强制要求）
+
+**核心目标**：**Application层的唯一职责是用例编排，绝对不能包含任何领域的实际逻辑代码。所有业务逻辑都必须下沉到Domain层。**
+
+**Application层唯一职责：用例编排**
+- ✅ 数据加载（从Repository加载实体）
+- ✅ 依赖注入装配（将网关接口的实现注入到领域服务）
+- ✅ 必要时做数据转换及多子域编排
+- ✅ 调用Domain Service
+- ✅ 发送通知
+- ✅ 事务管理
+- ❌ **禁止**：业务规则判断、计算、验证、算法等领域的实际逻辑代码
+
+**Domain层职责：所有业务逻辑**
+- ✅ 可依赖本子域定义的网关接口（由基础设施注入）
+- ✅ 接收值对象作为参数
+- ✅ 实现所有业务判断、计算、规则验证
+- ✅ 不直接依赖其他子域的实体或仓储
+
+### ⚠️ 核心原则：跨子域协作采用依赖倒置与网关接口（强制要求）
+
+**目标**：**仅在跨子域（上下文边界）**使用依赖倒置；子域不直接依赖其他子域的实现；需要跨子域能力时，由“需要方”在领域层定义网关接口，由基础设施层实现并负责调用与数据转换，减少应用层编排与值对象传递。子域内部可直接依赖本子域类型，无需额外抽象。
+
+**网关接口（端口）**
+- 每个服务在**自己的领域层**定义自己需要的网关接口（端口），即“本领域需要的能力”的抽象。
+- 接口定义位置：`domain/{subdomain}/service/`（如 `xxx_interface.go`），不放在 application/port。
+- 谁需要能力谁定义接口；各自领域只负责定义或实现，不把跨子域接口写到应用层基础设施。
+- **适配器依赖的次级端口**：适配器在实现本子域端口时，若需委托“其他能力”（如货币增加者），该能力的接口也应在**同一需要方子域**内定义（如 `domain/backpack/service/currency_adder_interface.go`），由基础设施层注入具体实现（如 CurrencyAppService）；不放在 application/port。
+
+**适配器（实现）**
+- 上述网关接口在**基础设施层**（`adapters/`）实现（适配器）。
+- 实现类负责：调用其他服务的 API（或本系统内其他子域/应用服务），并做请求/响应的数据转换。
+- 领域层只定义接口；基础设施层（adapters）实现接口并完成“调谁、怎么转数据”。
+
+**禁止事项**
+- 子域 A 不能直接依赖子域 B 的**实体、仓储、具体类型**（不能 import B 的 entity/repository/具体 struct）。
+- **禁止子域之间互相 import**：禁止子域之间互相 import 对方的包（含 valueobject、entity）；**允许**各子域与 application 引用 **domain/crossdomain** 的共享对象类型；**禁止在 crossdomain 中共享接口**。领域之间的接口仍应尽量避免；「A 需要 B 的接口/能力」由需要方子域定义接口、基础设施实现。
+- 跨子域接口不要定义在 application/port；应在“需要该能力”的子域内定义。
+
+**跨子域时类型/值对象的用法**
+- **优先基础类型**：跨子域接口的方法参数/返回值优先使用基础类型（int、string、bool 等）约定。
+- 需要方子域可在本子域内定义值对象，或由应用层在边界做 DTO 转换；**禁止**跨子域 import 其他子域的值对象/entity。
+- **无法用基础类型时**：可将多子域共用的对象类型放入 **domain/crossdomain**（仅类型，不共享接口）。
+
+**跨子域通信的优先级顺序**（必须按此顺序选择）:
+1. **优先级1：优先基础类型**：能用 int、string、bool 等基础类型表达的，优先使用基础类型。
+2. **优先级2：共享领域对象**：无法用基础类型时，使用 **domain/crossdomain** 中的共享对象类型（仅类型，不共享接口）。
+3. **优先级3：依赖倒置 + 网关接口**：需要方子域定义接口，基础设施实现并调用其他服务/子域并做数据转换。
+4. **优先级4：应用层编排 + 本子域值对象**：难以抽象成稳定接口时，由应用层编排，通过本子域值对象传递；值对象**仅能**放在本子域内 `domain/{subdomain}/valueobject/`。
+5. **优先级5：领域事件**：异步、完全解耦、跨服务场景。
+
+### 分层架构
+
+- **领域层(Domain)**:核心业务逻辑,不依赖任何外部框架；**不依赖 adapters**，**不依赖 application**；**可依赖 common、excel 等公用包**；依赖 domain 内 port/service/entity/valueobject、**domain/crossdomain**（共享对象类型）及 common、excel。
+- **应用层(Application)**:用例编排,协调领域对象；**只依赖 domain 的 port/service 与 application/port**，不依赖 adapters/technical；接口在 port/，其实现由 adapters 注入。
+- **基础设施层(infrastructure)**:技术实现与适配器，实现领域层仓储、领域层网关接口及 technical 组件（database、registry 等）；Key 通过 PersistableEntity.GetRedisKey() 或本子域 domain 获取；可依赖 domain 与 application/port。
+- **接口层(Interface)**:外部交互,请求转换
+
+### 公用包依赖（common、excel 等）
+
+- **领域层可以依赖 common、excel**：领域层**允许**且**可以** import `common`、`excel` 等项目内公用包（读配置表、公共工具、日志等）。读配置表、使用公共工具/日志等**不视为违反分层**，**不强制**为“读表”等简单能力做端口+基础设施实现；实现（如基于 Excel 的配置提供者）**可**放在 `domain/{subdomain}/infrastructure/` 或 `adapters/domain_impl/`。
+- **所有层均可依赖公用包**：应用层、基础设施层、接口层也**均可** import `common`、`excel` 等公用包。
+- **领域层禁止项**：领域层**禁止** import `application/`、`handler/`、`adapters/`；**禁止** import 其它 domain 子域（不得形成 domain→domain 其它子域依赖）；**允许**依赖本子域、**domain/crossdomain**、**common、excel 等公用包**。
+- **防幻觉**：勿误以为“领域不能依赖 Excel/配置库”。领域**可以**依赖 common、excel；仅禁止依赖 application、adapters、handler。
+- **数据库/Redis 访问**：领域层不直接依赖 DB/Redis 驱动，仅通过**仓储等 port 接口**使用；具体实现（可在 `domain/{subdomain}/infrastructure/` 或 `adapters/domain_impl/`）内可依赖 common、excel、db/redis 等。
+
+### 各层职责
+
+#### Handler层（接口层）- 薄层
+- ✅ 基本验证（类型、非空、范围）
+- ✅ 提取playerID等上下文信息
+- ✅ 调用Application Service
+- ❌ 禁止配置表查询、业务规则判断、复杂计算、通知发送
+
+#### Application层（应用层）- 薄层
+- ✅ 用例编排（数据加载 → 依赖注入装配 → 必要时数据转换 → 调用Domain Service → 发送通知）
+- ❌ 禁止业务规则判断、计算、验证、算法等领域的实际逻辑代码
+
+**应用层依赖边界（强制）**
+- ✅ **只依赖端口**：应用层仅允许依赖 `domain/{subdomain}/port`、`domain/{subdomain}/service`（领域端口）以及 `application/port`（应用层端口）；通过构造函数注入具体实现，代码中只引用接口类型。
+- ❌ **禁止依赖基础设施**：应用层**禁止** import `adapters/technical`（如 database、registry、config 等）。访问 Redis/DB、访问 Registry 等必须通过**仓储或网关接口**由基础设施层实现，应用层只调用端口方法。
+- 目的：保证应用层纯编排、可测（可 mock 端口），技术细节全部在 adapters 内。
+
+#### Domain层（领域层）- 厚层
+- ✅ 业务规则判断、复杂计算和算法、领域逻辑封装、实体行为
+- ✅ **领域可依赖 domain/crossdomain、common、excel**：可 import domain/crossdomain（共享对象类型）、common、excel（读配置表、公共工具等），不视为违反分层；不引入对其它 domain 子域的依赖。
+- ❌ **Domain 不可依赖 Application**：领域层禁止 import `application/` 下任何包；依赖方向仅为 Application → Domain，不得反向。
+
+### 接口与实现的存放规则（强制）
+
+**接口（端口）存放**：
+- **应用层接口**：`srv/game/application/port/` — 应用层需要的端口（如 DomainServiceCreator、RepositoryProvider、PlayerEventHandler、LoginService、各领域服务类型别名等）；仅放接口定义，禁止放实现。
+- **领域层接口**：`domain/{subdomain}/port/` — 仓储、网关等端口（**仅接口**）；`domain/{subdomain}/service/` — 领域服务接口及跨子域网关接口（**仅接口**，谁需要谁定义）。跨子域能力接口不放在 application/port，由需要方子域在 domain 内定义。**实例缓存端口约定**：需要按 key 缓存领域服务实例时，在本子域 port 下定义 `XxxInstanceRegistry`（如 BackpackInstanceRegistry），方法统一为 GetInstance(key)、SetInstance(key, svc)、RemoveInstance(key)，key 类型按子域不同；各子域自管、通过约定统一形状，不共享跨子域接口。
+
+**实现存放**：
+- **应用层接口的实现**：`srv/game/application/impl/` — 仅放“实现 application/port 中接口”的代码（如 DomainServiceManager、PlayerEventManager）。不放接口定义。
+- **基础设施/适配器实现**：`srv/game/adapters/` — 实现领域层仓储、领域层网关接口及技术组件的代码。含 `di/`（依赖注入）、`technical/`（DB/Redis/配置等）、`domain_impl/`（各子域在适配器侧的实现，可选）。领域层不依赖 adapters，只依赖 domain 内接口。
+- **领域层实现（子域唯一实现目录）**：`domain/{subdomain}/infrastructure/` — 子域内**所有**实现（子域自管基础设施）。**禁止**再使用 `domain/{subdomain}/impl/`；接口在 port/、service/，实现**统一**放在 infrastructure/。port（仓储、网关等）的实现**可**放在 `domain/{subdomain}/infrastructure/`，**也可**放在 `adapters/domain_impl/{subdomain}/`，二选一或按子域约定。放在 domain/infrastructure 时，该 infrastructure 包**可** import common、excel、common/db/redis、common/config 等；domain 内 entity、service、port **不** import 本子域 infrastructure，仅依赖 port 接口。
+
+**引用规则**：
+- **应用层**：只 import `application/port`、`domain/.../port`、`domain/.../service` 及领域实体/值对象（用于参数、返回值类型）；可 import **common、excel 等公用包**（与禁止依赖基础设施不冲突，common/excel 非 adapters）；禁止 import `adapters/` 下任何包（含 technical、domain_impl）。
+- **领域层**：可 import 本子域、**domain/crossdomain**、**common、excel 等公用包**；**禁止 import application/、handler/、adapters/**；**禁止** import 其它 domain 子域（不引入 domain→domain 其它子域依赖）。
+- **基础设施层**：可 import `domain/`、`application/port`、`adapters/technical` 等；实现端口时在 adapters 内完成 Key 生成、DB/Redis/Registry 调用。
+- **实现包**（`domain/{subdomain}/infrastructure/` 或 `adapters/domain_impl/`）：可 import `domain/`、`common`、`excel`、`common/db/redis`、`common/config` 等；由 DI 注入为 port，领域内 entity/service/port 不直接依赖实现包。**子域内实现**之间若某能力仅有一种实现，可直接依赖该实现类型（不必经 port 接口）。
+- 需要“实现类型”（构造、注入）时仅在 **di 或 测试** 中 import `application/impl`、`adapters/...`。
+- 禁止在 port 或 domain 的接口目录下放实现；禁止在 application/impl、domain/.../infrastructure 或 adapters 下放接口定义（可放仅本包使用的内部接口）。
+
+### 目录结构规范
+
+**共享领域（domain/crossdomain/）**：
+- **domain/crossdomain/** — 共享领域，仅放多子域共用的**对象类型**（枚举、极简 struct、契约类型），**不放接口**；crossdomain 禁止 import 其他 domain 子域。
+
+**子域固定目录结构（domain/{subdomain}/）**：
+- `entity/` — 领域实体（含聚合根）。可选子目录 `entity/storage/`：Key 常量、Storage、key_helper 等。
+- `port/` — 端口（**仅接口**）：仓储、网关等。
+- `service/` — 领域服务、网关接口（**仅接口**）。
+- `valueobject/` — 值对象（**仅本子域**）；禁止在 domain 根下再设其它共享 valueobject 包（仅 crossdomain 为唯一共享领域）；优先复制而非共享。
+- `infrastructure/` — **子域内所有实现（唯一实现目录）**，不再使用 impl/。
+  - `infrastructure/repository/` — 仓储实现。
+  - `infrastructure/event/` — 事件处理器、反序列化等。
+  - `infrastructure/*.go` — 网关/适配器/Provider/Factory/Registry 等平铺。
+
+**领域层(Domain)**（与上一致）:
+- **crossdomain/** - 共享领域，仅对象类型，不放接口
+- `{subdomain}/entity/` - 领域实体（含聚合根）；可选 `entity/storage/`
+- `{subdomain}/port/` - 仓储、网关等端口（仅接口）
+- `{subdomain}/service/` - 领域服务及跨子域网关接口（仅接口）
+- `{subdomain}/valueobject/` - 值对象（仅本子域内使用）
+- `{subdomain}/infrastructure/` - 子域内所有实现（repository/、event/、其余平铺）；**禁止**使用 `{subdomain}/impl/`
+
+**应用层(Application)**:
+- `service/` - 应用服务(用例编排)
+- `port/` - 应用层端口（仅接口）；跨子域网关接口由各子域在 domain 内定义，不放在此处
+- `impl/` - 应用层端口的实现（仅实现，如 DomainServiceManager、PlayerEventManager）
+- `event_handler/` - 事件处理器
+
+**基础设施层(infrastructure)**:
+- `adapters/di/` - 依赖注入容器
+- `adapters/technical/` - 技术组件（DB、Redis、配置等）实现
+- `adapters/domain_impl/` - 各子域仓储、网关适配器等实现（实现 domain 层接口）
+
+**接口层(Interface)**:
+- `handler/` - 消息处理器
+
+### 领域驱动设计原则
+
+- **实体(Entity)**:有唯一标识的业务对象
+- **值对象(Value Object)**:不可变的业务概念，定义在**本子域内** `domain/{subdomain}/valueobject/`；跨域共享的对象类型放在 **domain/crossdomain**（仅类型，不共享接口）；禁止子域之间互相引用对方值对象，优先复制而非共享
+- **聚合(Aggregate)**:一组相关对象的集合；聚合根为实体，放在 `domain/{subdomain}/entity/`，不单独建 `domain/aggregate/` 目录。
+- **仓储(Repository)**:数据访问抽象（按领域对象取/存，接口在 port，实现在 infrastructure/repository 或 adapters）
+  - 接口定义: `domain/{subdomain}/port/`（仓储端口）
+  - 实现位置: **可**在 `domain/{subdomain}/infrastructure/repository/` 或 `adapters/domain_impl/{subdomain}/repository/`（二选一或按子域约定）；实现内可依赖 common、excel、db/redis 等。
+  - 命名: `{Entity}RepositoryInterface` (接口), `{Storage}{Entity}Repository` (实现)
+  - 领域内实现**文件名**不暴露具体存储技术（不以 `redis_`、`registry_` 等为前缀），建议 `{实体}_repository.go`、`{实体}_repository_registry.go`
+- **领域服务(Domain Service)**:不属于单一实体的业务逻辑
+  - 位置: `domain/{subdomain}/service/`
+  - ✅ 可依赖本子域定义的**网关接口**（由基础设施注入）；不直接依赖其他子域的实体或仓储
+  - ✅ 可接收值对象作为参数；接口参数类型由接口约定
+- **应用服务(Application Service)**:用例编排,无状态
+  - 位置: `application/service/`
+  - ⚠️ **唯一职责是用例编排,禁止领域逻辑代码**
+- **领域事件(Domain Event)**:领域内发生的重要业务事件
+  - 事件实体: `domain/{subdomain}/entity/`
+  - 事件处理器: `application/event_handler/`
+  - 事件总线: `common/eventbus`
+
+### Repository 设计规范
+
+- **必需性**:所有需要数据持久化的领域实体都应该有对应的 Repository
+- **接口定义**:子域 Repository 接口定义在 `domain/{subdomain}/port/`
+- **实现位置**: **可**在 `domain/{subdomain}/infrastructure/repository/` 或 `adapters/domain_impl/{subdomain}/repository/`（二选一或按子域约定）；实现内通过实体 GetRedisKey() 或本子域 domain 获取 Key，可依赖 common、excel、database、registry 等。
+- **命名规范**: `{Entity}RepositoryInterface` (接口), `{Storage}{Entity}Repository` (实现)
+- **领域内实现文件名**: domain 下仓储等实现文件**不暴露具体存储技术**，不以 `redis_`、`registry_`、`memory_` 等为文件名前缀；建议使用 `{实体}_repository.go`（主实现）、`{实体}_repository_registry.go`（Registry 等辅助实现），便于领域层语义与技术解耦。
+- **缓存机制**:对于访问频繁的聚合根,使用 `RegistryXxxRepository` (Registry + Redis)
+
+- **仓储实现文件约定**（文件数量与接口对应关系）:
+  - 一个仓储接口对应一个主实现文件：`{实体}_repository.go`。
+  - 若该仓储使用 Registry 包装（内存缓存 + 持久化），则再增加 `{实体}_repository_registry.go`。
+  - 子域内有多个仓储接口时，每个接口对应各自的 `{实体}_repository.go`（及可选的 `{实体}_repository_registry.go`），故会出现多个文件。
+  - 辅助逻辑（如 keyed loader、keyed deleter）可单独成文件，如 `account_keyed_loader.go`。
+  - 因此「单文件」表示该子域仅有一个仓储接口且无 Registry；「多文件」表示多个仓储接口和/或 Registry/辅助文件，并非随意拆分。
+
+### 实体持久化设计规范（Storage 组合模式）
+
+- **组合模式**:所有需要持久化的实体必须使用 Storage 组合模式
+- **统一接口**:所有 Storage 结构体必须实现 `PersistableEntity` 接口
+- **模板函数**:每个 Storage 结构体必须提供 `New{Entity}StorageTemplate()` 函数
+- **定义位置**: `domain/{subdomain}/entity/{entity}.go` 或 `domain/{subdomain}/entity/storage/{entity}_storage.go`
+
+### 数据结构创建规范
+
+- **必需性**:所有用于序列化/反序列化、数据传输或中间存储的数据结构都必须提供 `New` 函数
+- **返回类型**:`New` 函数返回结构体指针 `*{StructName}`
+- **命名**: `New{StructName}()` 或 `New{TargetStructName}From{SourceStructName}()`
+
+## 编程实践
+
+### 错误处理
+- 使用 `error` 类型返回错误,不使用 panic(除非是致命错误)
+- 使用 `fmt.Errorf` 包装错误,使用 `%w` 保留原始错误链
+- 定义业务错误常量
+
+### 接口设计
+- 接口应该小而专注,遵循接口隔离原则
+- **接口类型名**:必须以 `Interface` 结尾,如 `AccountRepositoryInterface`
+- **接口文件名**: `{entity}_repository_interface.go` 或 `{service}_interface.go`
+- **实现命名**:去掉 `Interface` 后缀,如 `RedisAccountRepository`
+
+### 并发安全
+- 使用 `sync.Mutex` 或 `sync.RWMutex` 保护共享资源
+- ⚠️ **禁止在领域层使用 lock**:在 `srv/game/domain/` 目录下禁止使用锁
+- ✅ **必须使用 safemap**:所有并发场景下的 map 操作必须使用 `safemap` 包
+
+### 时间获取规范
+- ⚠️ **禁止直接调用**:禁止直接调用 `time.Now()` 等标准库时间接口获取当前时间。
+- ✅ **必须使用 clock 包**:必须使用 **clock 包** 提供的时间接口：`clock.Now()`、`clock.NowUnix()`、`clock.NowUnixMilli()`、`clock.NowUnixNano()`、`clock.NowUnixTicktTime()`。
+- **原因**:直接获取系统时间将导致无法做时间软修改（如服务器时间偏移、单测固定时间）；统一通过 clock 包便于后续通过 `SetClock` 切换实现。如需“真实耗时”测量可单独约定例外，业务语义时间一律走 clock。
+
+### Redis Key 和常量定义规范
+- **各子域自管**: Redis Key 格式与生成在**各自子域**内定义，位置为 `domain/{subdomain}/entity/storage/`（如 `key_constants.go` + 各 Storage 的 `GetRedisKey()`）
+- **命名规范**: 常量命名如 `RedisKeyFormatXxx`，Storage 实现 `PersistableEntity.GetRedisKey()` 使用本子域常量生成 Key
+- ❌ **禁止硬编码**: 不要在代码中直接使用字符串作为 Redis Key 或字段名
+- ✅ **基础设施获取方式**: 仓储、GenericRepository、ChangeTracker 通过 `PersistableEntity.GetRedisKey()` 或本子域 domain 提供的 Key 生成方式获取 Key，不在基础设施层硬编码 Key 字符串；应用层、领域层不依赖基础设施的 rediskey 包，领域层在本子域 entity/storage 内持有 Key 格式

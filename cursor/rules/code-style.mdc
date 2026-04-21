@@ -1,0 +1,52 @@
+---
+description: Go 代码风格规范
+globs: ["**/*.go"]
+alwaysApply: false
+---
+
+# Go 代码风格规范
+
+## 命名规范
+- **包名**:小写字母,简短且有意义
+- **文件名**:小写字母和下划线,如 `user_handler.go`
+- **变量和函数**:驼峰命名(camelCase)
+- **类型和接口**:帕斯卡命名(PascalCase)
+- **接口命名**:接口类型名必须以 `Interface` 结尾,如 `UserRepositoryInterface`；应用层 `application/port/` 目录下类型名可省略 `Interface` 后缀（目录已表示接口）
+- **接口文件名**: `{entity}_repository_interface.go` 或 `{service}_interface.go`；port 下可用 `xxx.go` 无 `_interface` 后缀
+- **接口与实现存放**: 接口放在 `application/port/` 或 `domain/{subdomain}/port/`、`domain/{subdomain}/service/`。应用层接口实现放在 `application/impl/`。**领域层实现统一放在 `domain/{subdomain}/infrastructure/`**（子域唯一实现目录）：仓储在 `infrastructure/repository/`，事件在 `infrastructure/event/`，网关/适配器/Provider/Factory 等平铺在 `infrastructure/` 根下；**禁止**使用 `domain/{subdomain}/impl/`。跨子域网关适配器等可放在 `adapters/domain_impl/`。**domain 下实现文件名不暴露具体存储技术**（不以 `redis_`、`registry_` 为前缀），建议 `{实体}_repository.go`、`{实体}_repository_registry.go`。**跨子域类型**：端口边界优先使用基础类型，无法时用 `domain/crossdomain` 共享对象类型，不共享接口；子域间仍禁止互相引用，领域间接口尽量避免。详见 `.cursor/rules/ddd-architecture.mdc` 中「接口与实现的存放规则」与「子域固定目录结构」
+- **常量**:全大写和下划线,如 `MaxRetryCount`
+- **错误变量**:以 `Err` 开头,如 `ErrNotFound`
+
+## 代码格式
+- 使用 `gofmt` 格式化代码
+- 使用 1 个 Tab 进行缩进
+- 每行代码长度不超过 120 个字符
+- 导入包按标准库,第三方库,项目内部包的顺序分组
+
+## 注释规范
+- **包注释**:每个包都应该有包级别的注释
+- **公开函数**:所有公开的函数,类型,变量都应该有注释
+- **复杂逻辑**:对复杂的业务逻辑和算法添加注释说明
+- **子域文档**:每个子域目录下必须有`README.md`文档,包含C4模型、架构设计、核心功能等
+- **文档同步**:修改子域代码时,必须同步更新对应子域的`README.md`文档
+
+## C4 模型文档规范
+- **必需性**:所有包含代码逻辑的目录的`README.md`文档必须包含C4模型
+- **必须包含Level 1到Level 4的所有层级标题**，即使某些层级暂时没有内容，也要保留标题
+- **顶层服务**:Level 1 和 Level 2 必须包含内容，Level 3 和 Level 4 可以暂时为空
+- **子域/公共库/工具**:Level 3 必须包含内容，Level 1、Level 2 和 Level 4 可以暂时为空
+- **格式**:必须使用 Mermaid 语法绘制
+
+## 函数设计
+- 函数应该短小精悍,单一职责
+- **函数行数限制**:单个函数代码行数不超过 500 行
+- **参数数量限制**:参数数量不超过 10 个,超过时考虑使用结构体
+
+## 并发安全规范
+- **禁止使用标准库 map**:所有需要并发安全的 map 操作必须使用 `safemap` 包
+- **禁止在领域层使用 lock**:在 `srv/game/domain/` 目录下禁止使用 `sync.Mutex`、`sync.RWMutex` 等锁
+- ✅ **必须使用 safemap**:所有并发场景下的 map 操作必须使用 `safemap` 包
+
+## 文件设计规范
+- **文件行数限制**:单个文件代码行数不超过 5000 行
+- 文件应该聚焦单一职责,一个文件只包含一个主要类型或功能模块

@@ -1,0 +1,41 @@
+---
+description: Protobuf 协议、message 生成、handlergen、GameID/ServerID、跨服务调用
+globs:
+  - "proto/**/*.proto"
+  - "message/**/*.go"
+  - "common/handlergen/**/*.go"
+  - "srv/game/handler/**/*.go"
+  - "srv/game/infrastructure/di/*.go"
+alwaysApply: false
+---
+
+# 协议、生成文件与 Handler 规范
+
+整合原 protocols.mdc + game-concepts.mdc。编辑 proto、message、handler、handlergen、DI 时加载。
+
+## 协议文件
+
+- 客户端与中心服普通协议 → **CtrSvr.proto**（前缀 `MsgCtr`）；GM → **CtrSvrGm.proto**（`MsgCtrGm`）。
+- 战斗服 → BtlSvr / BtlSvrMap；服间 → Ctr2BtlSvr*。
+- 请求消息字段从 1 顺序编号；响应：`Ret` 固定为 1，其余从 2。
+- 枚举名全局唯一由 **tools/proto** 生成时处理；定义可用简单名如 `None = 0`。
+- **禁止**直接 `protoc`；**必须**用 `tools/proto` 下工具（参见 `.cursor/skills/proto-codegen-tool/SKILL.md`）。
+
+## 接口添加流程（摘要）
+
+1. 在对应 `.proto` 定义消息 → 2. 运行 proto 生成 → 3. Handler 实现生成接口 → 4. `h.Register` → 5. `message_adapter.go` HTTP 映射 → 6. 应用服务按需实现。
+
+## message/ 与 handlergen
+
+- **`message/`、`common/handlergen/` 禁止手改**；改消息只改 `.proto` 再生成。
+- Handler 必须实现 `handlergen` 生成接口；跨服务发消息**必须**用生成 client（如 `gameclient.SendXxx`），禁止手拼 BaseMsg + Forward。
+- handler 再生成：见 `.cursor/skills/handler-generator-tool/SKILL.md`。
+
+## ID 与 ServerID
+
+- **AccountGuid** → **PlayerGuid** → 多 **playerRoleId**（角色相关用 playerRoleId，玩家级用 PlayerGuid）。
+- **GameID**（字符串）：`game_id`，Redis/内部；**ServerID**（int32）：登录与客户端消息；须与 `login.toml` 的 `GameServers[].ServerID` 及对应 `game_id` 一致。
+
+## 禁止
+
+- 中心服普通协议不放错文件；不改已发布消息字段号；不手改 message/ 与 handlergen/。
